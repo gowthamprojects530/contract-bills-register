@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>SOR Manager — All Columns Visible</title>
+<style>
+  :root{
+    --bg1:#071226; --bg2:#041027;
+    --card: rgba(255,255,255,0.03);
+    --accent:#6ee7b7; --accent2:#7dd3fc;
+    --muted:#9fb0bf; --danger:#ff6b6b;
+    --radius:12px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:Inter,system-ui, -apple-system, "Segoe UI", Roboto, Arial;background:
+    linear-gradient(180deg,var(--bg1),var(--bg2));color:#e6f0f2}
+  .app{max-width:1200px;margin:20px auto;padding:16px}
+  .card{background:var(--card);border-radius:var(--radius);padding:14px;}
+  header{display:flex;gap:12px;align-items:center;margin-bottom:12px}
+  .logo{width:44px;height:44px;border-radius:8px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;font-weight:800;color:#042;}
+  h1{font-size:18px;margin:0}
+  .grid{display:grid;grid-template-columns:1fr 420px;gap:14px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{padding:8px;text-align:left;border-bottom:1px solid rgba(255,255,255,0.04);vertical-align:top}
+  th{font-weight:700;color:var(--muted);white-space:nowrap}
+  td{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .small{font-size:12px;color:var(--muted)}
+  input,textarea,select{width:100%;padding:8px;border-radius:8px;background:transparent;border:1px solid rgba(255,255,255,0.04);color:inherit}
+  .formGroup{margin-bottom:10px}
+  .row{display:flex;gap:10px}
+  .btn{padding:8px 10px;border-radius:10px;border:0;background:transparent;color:inherit;cursor:pointer}
+  .btn.primary{background:linear-gradient(90deg,var(--accent),var(--accent2));color:#012}
+  .btn.ghost{border:1px solid rgba(255,255,255,0.04)}
+  .btn.warn{background:var(--danger);color:#fff}
+  .actions{display:flex;gap:6px;flex-direction:column}
+  .nowrap{white-space:nowrap}
+  @media (max-width:1000px){
+    .grid{grid-template-columns:1fr}
+    table, thead, tbody, th, td, tr { display: block; }
+    thead tr { position: absolute; top: -9999px; left: -9999px; }
+    tr { margin-bottom: 8px; border-bottom:1px solid rgba(255,255,255,0.02) }
+    td { border:0;padding:6px 4px }
+    td:before { font-weight:700; display:block; color:var(--muted); margin-bottom:4px }
+  }
+</style>
+</head>
+<body>
+  <div class="app">
+    <header class="card">
+      <div class="logo">SOR</div>
+      <div style="flex:1">
+        <h1>SOR Manager — All Columns Visible</h1>
+        <div class="small">Every field shows in the list after saving. Data stored in localStorage key: <code>sor_data</code></div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button id="homeBtn" class="btn ghost">Home</button>
+        <button id="exportBtn" class="btn">Export JSON</button>
+        <input id="importFile" type="file" style="display:none" />
+        <label for="importFile" class="btn ghost">Import</label>
+      </div>
+    </header>
+
+    <main class="grid">
+      <section class="card" style="overflow:auto">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <input id="filterText" placeholder="Search by Depot (or part of it)..." style="flex:1;margin-right:8px" />
+          <div class="small" id="countText">0 records</div>
+        </div>
+
+        <div style="overflow:auto;max-height:600px">
+          <table>
+            <thead>
+              <tr>
+                <th style="min-width:160px">Depot</th>
+                <th style="min-width:110px">Agency</th>
+                <th style="min-width:160px">Name of the Contractor</th>
+                <th style="min-width:90px">Distance (km)</th>
+                <th style="min-width:90px">ASOR (%)</th>
+                <th style="min-width:110px">Unloading at GS</th>
+                <th style="min-width:160px">Issues</th>
+                <th style="min-width:90px">Receipt Upto10</th>
+                <th style="min-width:90px">Receipt Upto16</th>
+                <th style="min-width:90px">Receipt Upto20</th>
+                <th style="min-width:110px">Receipt Beyond20</th>
+                <th style="min-width:110px">Transportation</th>
+                <th style="min-width:110px">Supervision</th>
+                <th style="min-width:220px">Note</th>
+                <th style="width:120px">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="listBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <aside class="card">
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <div class="formGroup">
+            <label for="depotName">Name of the Depot</label>
+            <input id="depotName" placeholder="e.g., FSD MG Complex" />
+          </div>
+
+          <div class="formGroup">
+            <label for="agency">Agency</label>
+            <input id="agency" placeholder="FCI / CWC / TNWC" />
+          </div>
+
+          <div class="formGroup">
+            <label for="contractorName">Name of the Contractor</label>
+            <input id="contractorName" placeholder="Contractor name" />
+          </div>
+
+          <div class="row">
+            <div style="flex:1" class="formGroup">
+              <label for="distance">Distance (km)</label>
+              <input id="distance" type="number" placeholder="e.g., 45" />
+            </div>
+            <div style="flex:1" class="formGroup">
+              <label for="asor">ASOR (%)</label>
+              <input id="asor" type="number" placeholder="e.g., 2.5" />
+            </div>
+          </div>
+
+          <div class="formGroup">
+            <label for="unloading">Unloading at GS</label>
+            <input id="unloading" type="number" placeholder="e.g., 4" />
+          </div>
+
+          <div class="formGroup">
+            <label for="issues">Issues</label>
+            <input id="issues" placeholder="Common issues" />
+          </div>
+
+          <div class="formGroup">
+            <label>Receipt slabs</label>
+            <div class="row">
+              <input id="receipt10" placeholder="Upto 10" />
+              <input id="receipt16" placeholder="Upto 16" />
+            </div>
+            <div class="row" style="margin-top:6px">
+              <input id="receipt20" placeholder="Upto 20" />
+              <input id="receiptBeyond" placeholder="Beyond 20" />
+            </div>
+          </div>
+
+          <div class="row">
+            <div style="flex:1" class="formGroup">
+              <label for="transportation">Transportation</label>
+              <input id="transportation" placeholder="Rate" />
+            </div>
+            <div style="flex:1" class="formGroup">
+              <label for="supervision">Supervision</label>
+              <input id="supervision" placeholder="Charges" />
+            </div>
+          </div>
+
+          <div class="formGroup">
+            <label for="note">Note</label>
+            <textarea id="note" rows="4" placeholder="Additional comments"></textarea>
+          </div>
+
+          <div style="display:flex;gap:10px">
+            <button id="saveBtn" class="btn primary">Save Entry</button>
+            <button id="cancelBtn" class="btn ghost">Cancel</button>
+          </div>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+<script>
+/*
+ Data schema:
+ {
+   id,
+   depotName,
+   agency,
+   contractorName,
+   distance,
+   asor,
+   unloading,
+   issues,
+   receipt10,
+   receipt16,
+   receipt20,
+   receiptBeyond,
+   transportation,
+   supervision,
+   note,
+   createdAt
+ }
+*/
+
+const $ = s => document.querySelector(s);
+const listBody = $('#listBody');
+const filterText = $('#filterText');
+const countText = $('#countText');
+const exportBtn = $('#exportBtn');
+const importFile = $('#importFile');
+const homeBtn = $('#homeBtn');
+
+const depotName = $('#depotName');
+const agency = $('#agency');
+const contractorName = $('#contractorName');
+const distance = $('#distance');
+const asor = $('#asor');
+const unloading = $('#unloading');
+const issues = $('#issues');
+const receipt10 = $('#receipt10');
+const receipt16 = $('#receipt16');
+const receipt20 = $('#receipt20');
+const receiptBeyond = $('#receiptBeyond');
+const transportation = $('#transportation');
+const supervision = $('#supervision');
+const note = $('#note');
+
+const saveBtn = $('#saveBtn');
+const cancelBtn = $('#cancelBtn');
+
+let data = [];
+let editingId = null;
+
+function loadFromStorage(){
+  try {
+    const raw = localStorage.getItem('sor_data');
+    data = raw ? JSON.parse(raw) : [];
+  } catch(e){ console.error(e); data = [] }
+}
+function saveToStorage(){ localStorage.setItem('sor_data', JSON.stringify(data)); }
+
+function escapeHtml(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function isNumber(v){ return v !== '' && !isNaN(Number(v)); }
+
+function renderList(){
+  const q = (filterText.value||'').trim().toLowerCase();
+  listBody.innerHTML = '';
+  const filtered = data.filter(it=>{
+    if(!q) return true;
+    return (it.depotName||'').toLowerCase().includes(q) || (it.agency||'').toLowerCase().includes(q) || (it.contractorName||'').toLowerCase().includes(q);
+  });
+
+  if(filtered.length === 0){
+    listBody.innerHTML = `<tr><td colspan="15" style="text-align:center;color:var(--muted)">No records — add SOR entries using the form</td></tr>`;
+  } else {
+    filtered.forEach(entry=>{
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td title="${escapeHtml(entry.depotName)}"><strong>${escapeHtml(entry.depotName)}</strong></td>
+        <td title="${escapeHtml(entry.agency)}">${escapeHtml(entry.agency||'')}</td>
+        <td title="${escapeHtml(entry.contractorName)}">${escapeHtml(entry.contractorName||'')}</td>
+        <td class="nowrap">${escapeHtml(entry.distance||'')}</td>
+        <td class="nowrap">${entry.asor !== undefined && entry.asor !== null ? Number(entry.asor).toFixed(2) : ''}</td>
+        <td class="nowrap">${escapeHtml(entry.unloading||'')}</td>
+        <td title="${escapeHtml(entry.issues)}">${escapeHtml(entry.issues||'')}</td>
+        <td class="nowrap">${escapeHtml(entry.receipt10||'')}</td>
+        <td class="nowrap">${escapeHtml(entry.receipt16||'')}</td>
+        <td class="nowrap">${escapeHtml(entry.receipt20||'')}</td>
+        <td class="nowrap">${escapeHtml(entry.receiptBeyond||'')}</td>
+        <td class="nowrap">${escapeHtml(entry.transportation||'')}</td>
+        <td class="nowrap">${escapeHtml(entry.supervision||'')}</td>
+        <td title="${escapeHtml(entry.note)}">${escapeHtml(entry.note||'')}</td>
+        <td style="white-space:normal">
+          <button class="btn ghost" data-id="${entry.id}" data-action="edit">Edit</button>
+          <button class="btn warn" data-id="${entry.id}" data-action="delete" style="margin-top:6px">Delete</button>
+        </td>
+      `;
+      listBody.appendChild(tr);
+    });
+  }
+  countText.textContent = filtered.length + ' records';
+  attachRowActions();
+}
+
+function attachRowActions(){
+  listBody.querySelectorAll('button[data-action]').forEach(b=>{
+    b.onclick = ()=> {
+      const id = b.getAttribute('data-id');
+      const a = b.getAttribute('data-action');
+      if(a === 'edit') openEdit(id);
+      if(a === 'delete') {
+        if(confirm('Delete this entry?')) deleteEntry(id);
+      }
+    };
+  });
+}
+
+function createEntry(obj){
+  obj.id = 'sor_' + Date.now() + '_' + Math.floor(Math.random()*9999);
+  obj.createdAt = Date.now();
+  data.unshift(obj);
+  saveToStorage();
+  renderList();
+  clearForm();
+}
+
+function updateEntry(id, values){
+  const idx = data.findIndex(d => d.id === id);
+  if(idx === -1) return;
+  data[idx] = {...data[idx], ...values};
+  saveToStorage();
+  renderList();
+  clearForm();
+}
+
+function deleteEntry(id){
+  data = data.filter(d => d.id !== id);
+  saveToStorage();
+  renderList();
+}
+
+function openEdit(id){
+  const entry = data.find(d => d.id === id);
+  if(!entry) return;
+  editingId = id;
+  depotName.value = entry.depotName || '';
+  agency.value = entry.agency || '';
+  contractorName.value = entry.contractorName || '';
+  distance.value = entry.distance || '';
+  asor.value = entry.asor || '';
+  unloading.value = entry.unloading || '';
+  issues.value = entry.issues || '';
+  receipt10.value = entry.receipt10 || '';
+  receipt16.value = entry.receipt16 || '';
+  receipt20.value = entry.receipt20 || '';
+  receiptBeyond.value = entry.receiptBeyond || '';
+  transportation.value = entry.transportation || '';
+  supervision.value = entry.supervision || '';
+  note.value = entry.note || '';
+}
+
+exportBtn.addEventListener('click', ()=>{
+  const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'sor_data.json'; a.click();
+  URL.revokeObjectURL(url);
+});
+
+importFile.addEventListener('change', (e)=>{
+  const f = e.target.files[0];
+  if(!f) return;
+  const reader = new FileReader();
+  reader.onload = ()=>{
+    try {
+      const parsed = JSON.parse(reader.result);
+      if(Array.isArray(parsed)) {
+        data = parsed;
+        saveToStorage();
+        renderList();
+      } else {
+        alert('Invalid file format: expected an array of entries');
+      }
+    } catch(err){ alert('Error parsing file'); console.error(err); }
+  };
+  reader.readAsText(f);
+});
+
+saveBtn.addEventListener('click', ()=>{
+  const dName = (depotName.value||'').trim();
+  const ag = (agency.value||'').trim();
+  const cont = (contractorName.value||'').trim();
+  const dist = (distance.value||'').trim();
+  const a = (asor.value||'').trim();
+
+  if(!dName){ alert('Please enter Depot name'); depotName.focus(); return; }
+  if(!ag){ alert('Please enter Agency'); agency.focus(); return; }
+  if(a === '' || !isNumber(a)){ alert('Enter valid ASOR percentage'); asor.focus(); return; }
+
+  const payload = {
+    depotName: dName,
+    agency: ag,
+    contractorName: cont,
+    distance: dist,
+    asor: a === '' ? null : parseFloat(a),
+    unloading: (unloading.value||'').trim(),
+    issues: (issues.value||'').trim(),
+    receipt10: (receipt10.value||'').trim(),
+    receipt16: (receipt16.value||'').trim(),
+    receipt20: (receipt20.value||'').trim(),
+    receiptBeyond: (receiptBeyond.value||'').trim(),
+    transportation: (transportation.value||'').trim(),
+    supervision: (supervision.value||'').trim(),
+    note: (note.value||'').trim()
+  };
+
+  if(editingId) updateEntry(editingId, payload);
+  else createEntry(payload);
+});
+
+cancelBtn.addEventListener('click', clearForm);
+filterText.addEventListener('input', renderList);
+homeBtn.addEventListener('click', ()=> { window.location.href = 'index.html'; });
+
+function clearForm(){
+  editingId = null;
+  depotName.value = '';
+  agency.value = '';
+  contractorName.value = '';
+  distance.value = '';
+  asor.value = '';
+  unloading.value = '';
+  issues.value = '';
+  receipt10.value = '';
+  receipt16.value = '';
+  receipt20.value = '';
+  receiptBeyond.value = '';
+  transportation.value = '';
+  supervision.value = '';
+  note.value = '';
+}
+
+loadFromStorage();
+renderList();
+</script>
+</body>
+</html>

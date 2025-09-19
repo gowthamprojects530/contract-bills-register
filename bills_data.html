@@ -1,0 +1,497 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Bills Data</title>
+<style>
+  body{font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,Arial;background:#071226;color:#eaf6f2;margin:18px}
+  .wrap{max-width:1200px;margin:0 auto}
+  .card{background:rgba(255,255,255,0.02);padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.03)}
+  h1{margin:0 0 12px 0}
+  .toolbar{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+  .btn{padding:8px 10px;border-radius:8px;border:0;cursor:pointer}
+  .btn.ghost{background:transparent;border:1px solid rgba(255,255,255,0.04);color:#cfe}
+  .btn.primary{background:linear-gradient(90deg,#7dd3fc,#6ee7b7);color:#042;padding:8px 12px}
+  .small{font-size:13px;color:#9fb0bf}
+  input.search, input.amount, input[type="date"]{padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:#0b1720;color:#eaf6f2}
+  label.filterLabel{font-size:12px;color:#9fb0bf;margin-left:6px}
+  table{width:100%;border-collapse:collapse;margin-top:10px;font-size:13px}
+  th,td{padding:8px 6px;border-bottom:1px solid rgba(255,255,255,0.03);text-align:left;vertical-align:top}
+  th{position:sticky;top:0;background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));color:#cde;padding:10px 6px;font-weight:700}
+  td.num{text-align:right}
+  .nowrap{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px}
+  .actions{display:flex;gap:6px}
+  .muted{color:#9fb0bf;font-size:13px}
+  .file{display:none}
+  @media (max-width:1100px){
+    table{font-size:12px}
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <h1>Bills Data — All Fields</h1>
+      <div class="small">Data stored in localStorage key <code>bills</code></div>
+    </div>
+
+    <div class="card">
+      <div class="toolbar">
+        <a href="index.html" class="btn ghost">← Home</a>
+        <button id="refreshBtn" class="btn ghost">Refresh</button>
+        <button id="exportCsvBtn" class="btn primary">Export Excel (CSV)</button>
+        <button id="exportJsonBtn" class="btn ghost">Export JSON</button>
+        <input id="importFile" type="file" class="file" accept="application/json" />
+        <label for="importFile" class="btn ghost" style="cursor:pointer">Import</label>
+
+        <div style="flex:1"></div>
+
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <input id="filter" class="search" placeholder="Search by Depot / Bill No / Contractor" />
+          <input id="filterAmount" class="amount" placeholder="Amount (exact)" style="width:130px" />
+          <label class="filterLabel">Period:</label>
+          <input id="filterFrom" type="date" />
+          <input id="filterTo" type="date" />
+        </div>
+      </div>
+
+      <div style="overflow:auto;max-height:72vh">
+        <table id="dataTbl">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Depot Name</th>
+              <th>Agency</th>
+              <th>Name of the Contractor</th>
+              <th>Bill Number</th>
+              <th>Date</th>
+              <th>Period From</th>
+              <th>Period To</th>
+              <th>Receipt Rice Bags</th>
+              <th>Receipt Rice Weight</th>
+              <th>Receipt Wheat Bags</th>
+              <th>Receipt Wheat Weight</th>
+              <th>Issue Rice Bags</th>
+              <th>Issue Rice Weight</th>
+              <th>Issue Wheat Bags</th>
+              <th>Issue Wheat Weight</th>
+              <th>Handling Charges (H&T)</th>
+              <th>Transportation charges</th>
+              <th>Supervision</th>
+              <th>Total H&T Claimed</th>
+              <th>Total amount admitted by FCI (Gross)</th>
+              <th>TDS</th>
+              <th>Nett Amount</th>
+              <th>SO Date</th>
+              <th>Remarks</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+<script>
+/*
+ Field mapping (from saved bill b):
+ A1 Depot
+ A2 Bill No
+ A3 Agency
+ A4 Rice Bags (receipt)
+ A5 Rice Weight (receipt)
+ A7 Wheat Bags (receipt)
+ A8 Wheat Weight (receipt)
+ A23 Issue Rice Bags
+ A24 Issue Rice Weight
+ A26 Issue Wheat Bags
+ A27 Issue Wheat Weight
+ A34 Wagon Receipt Total
+ A35 Stacking Total
+ A36 Issues Total
+ A37 Transportation Total
+ A39 ASOR (calculated)
+ A40 Supervision (calculated)
+ A41 Gross
+ A42 TDS
+ A43 Other Recoveries
+ A44 SD Recovery yes/no
+ A45 SD Recovery amount
+ A46 Nett
+ A47 Contractor name
+ A48 Date
+ A49 Period From
+ A50 Period To
+ A51 H&T Claimed amount
+ A52 Withheld amount
+ A53 Remarks
+ A54 SO Date
+*/
+
+const BILLS_KEY = 'bills';
+const SOR_KEYS = ['sor_data','sorData_v1','sor'];
+
+function loadBills(){
+  try { return JSON.parse(localStorage.getItem(BILLS_KEY) || '[]'); } catch(e){ return []; }
+}
+function saveBills(arr){ localStorage.setItem(BILLS_KEY, JSON.stringify(arr)); }
+
+let sorMap = {};
+function loadSOR(){
+  sorMap = {};
+  for(const k of SOR_KEYS){
+    try{
+      const raw = localStorage.getItem(k);
+      if(!raw) continue;
+      const arr = JSON.parse(raw);
+      if(!Array.isArray(arr)) continue;
+      arr.forEach(it=>{
+        const name = (it.depotName||it.depot||'').trim();
+        if(!name) return;
+        let asor = Number(it.asor||0); if(asor>1) asor = asor/100;
+        let sup = Number(it.supervision||0); if(sup>1) sup = sup/100;
+        sorMap[name] = {
+          asor: asor,
+          supervision: sup,
+          agency: it.agency || '',
+          contractorName: it.contractorName || ''
+        };
+      });
+      if(Object.keys(sorMap).length) break;
+    }catch(e){ continue; }
+  }
+}
+function getASORForDepot(dep){ if(!dep) return 0; return (sorMap[dep] && typeof sorMap[dep].asor === 'number') ? Number(sorMap[dep].asor) : 0; }
+function getSupervisionRateForDepot(dep){ if(!dep) return 0; return (sorMap[dep] && typeof sorMap[dep].supervision === 'number') ? Number(sorMap[dep].supervision) : 0; }
+
+function fmtMoney2(v){
+  const n = Number(String(v||0).replace(/,/g,'')); if(!isFinite(n)) return '0.00';
+  return n.toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+function fmtMoney0(v){
+  const n = Number(String(v||0).replace(/,/g,'')); if(!isFinite(n)) return '0';
+  return Math.round(n).toLocaleString('en-IN');
+}
+function fmtWeight(v){
+  const n = Number(String(v||0).replace(/,/g,'')); if(!isFinite(n)) return '0.000000';
+  return n.toFixed(6);
+}
+function fmtInt(v){ const n = Number(String(v||0).replace(/,/g,'')); if(!isFinite(n)) return '0'; return String(Math.trunc(n)); }
+
+/* format date as dd-mm-yyyy if possible, otherwise return original string */
+function formatDateDDMMYYYY(s){
+  if(!s) return '';
+  // Accept YYYY-MM-DD or ISO strings. Try splitting first.
+  try {
+    // if already contains '-' and looks like YYYY-MM-DD
+    if(/^\d{4}-\d{2}-\d{2}$/.test(s)){
+      const [y,m,d] = s.split('-'); return `${d}-${m}-${y}`;
+    }
+    // If it's in ISO format with time, try new Date
+    const dt = new Date(s);
+    if(isNaN(dt.getTime())) return s;
+    const d = String(dt.getDate()).padStart(2,'0');
+    const m = String(dt.getMonth()+1).padStart(2,'0');
+    const y = dt.getFullYear();
+    return `${d}-${m}-${y}`;
+  } catch(e){ return s; }
+}
+
+function cell(text, cls){
+  const td = document.createElement('td');
+  if(cls) td.className = cls;
+  td.textContent = (text===null || text===undefined) ? '' : String(text);
+  return td;
+}
+
+/* Rendering with filters: text search, amount exact match, date range on A48 (Bill Date) */
+function renderTable(){
+  const tbody = document.getElementById('tbody');
+  tbody.innerHTML = '';
+  const bills = loadBills();
+  loadSOR();
+  const q = (document.getElementById('filter').value||'').trim().toLowerCase();
+  const amtStr = (document.getElementById('filterAmount').value||'').trim();
+  const amtNum = amtStr==='' ? null : Number(amtStr.replace(/,/g,''));
+  const fromVal = (document.getElementById('filterFrom').value||'').trim();
+  const toVal = (document.getElementById('filterTo').value||'').trim();
+
+  // parse range dates as ISO strings for comparison
+  const fromDate = fromVal ? new Date(fromVal) : null;
+  const toDate = toVal ? new Date(toVal) : null;
+
+  if(!bills.length){
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 27; td.className = 'muted';
+    td.textContent = 'No bills saved';
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
+  }
+
+  bills.forEach((b, idx)=>{
+    const depot = (b.A1||'').trim();
+    const agency = b.A3 || (sorMap[depot] && sorMap[depot].agency) || '';
+    const contractor = b.A47 || (sorMap[depot] && sorMap[depot].contractorName) || '';
+    const billNo = b.A2 || '';
+    const dateRaw = b.A48 || '';
+    const pFromRaw = b.A49 || '';
+    const pToRaw = b.A50 || '';
+    const dateDisplay = formatDateDDMMYYYY(dateRaw);
+    const pFromDisplay = formatDateDDMMYYYY(pFromRaw);
+    const pToDisplay = formatDateDDMMYYYY(pToRaw);
+
+    const rRiceBags = b.A4 || '';
+    const rRiceW = b.A5 || '';
+    const rWheatBags = b.A7 || '';
+    const rWheatW = b.A8 || '';
+    const iRiceBags = b.A23 || '';
+    const iRiceW = b.A24 || '';
+    const iWheatBags = b.A26 || '';
+    const iWheatW = b.A27 || '';
+
+    const wagonTotal = Number((b.A34||'')||0);
+    const stackingTotal = Number((b.A35||'')||0);
+    const issuesTotal = Number((b.A36||'')||0);
+    const transportTotal = Number((b.A37||'')||0);
+
+    const asor = getASORForDepot(depot);
+    const supRate = getSupervisionRateForDepot(depot);
+
+    const opsSum = wagonTotal + stackingTotal + issuesTotal;
+    const handlingCharges = opsSum * (1 + asor);
+    const transportationCharges = transportTotal * (1 + asor);
+
+    // supervision charges: prefer saved b.A40 (if present numeric), else compute from A39 * supRate or from A38*A...? We'll compute:
+    let supervisionCharges = Number(b.A40 || 0);
+    if(!supervisionCharges){
+      const savedA39 = Number(b.A39 || 0);
+      if(savedA39) supervisionCharges = savedA39 * supRate;
+      else supervisionCharges = opsSum * supRate; // fallback
+    }
+
+    const htcClaimed = Number(b.A51 || 0);
+    const gross = Number(b.A41 || 0);
+    const tds = Number(b.A42 || 0);
+    const nett = Number(b.A46 || 0);
+    const soDateRaw = b.A54 || '';
+    const soDateDisplay = formatDateDDMMYYYY(soDateRaw);
+    const remarks = b.A53 || '';
+
+    // Filtering logic:
+    // text filter: depot/billNo/contractor
+    if(q){
+      const hay = `${depot} ${billNo} ${contractor}`.toLowerCase();
+      if(!hay.includes(q)) return;
+    }
+    // amount filter: if provided, match exact on gross or nett (rounded to nearest integer comparison)
+    if(amtNum !== null){
+      const grossRound = Math.round(gross);
+      const nettRound = Math.round(nett);
+      if(!(grossRound === amtNum || nettRound === amtNum)) return;
+    }
+    // period filter: check bill date (A48) between fromDate and toDate if provided
+    if(fromDate || toDate){
+      if(!dateRaw) return;
+      const billDate = new Date(dateRaw);
+      if(isNaN(billDate.getTime())) return;
+      if(fromDate && billDate < fromDate) return;
+      if(toDate && billDate > toDate) return;
+    }
+
+    // Build row
+    const tr = document.createElement('tr');
+    tr.appendChild(cell(String(idx+1), 'nowrap')); // serial
+    tr.appendChild(cell(depot, 'nowrap'));
+    tr.appendChild(cell(agency, 'nowrap'));
+    tr.appendChild(cell(contractor, 'nowrap'));
+    tr.appendChild(cell(billNo, 'nowrap'));
+    tr.appendChild(cell(dateDisplay, 'nowrap'));
+    tr.appendChild(cell(pFromDisplay, 'nowrap'));
+    tr.appendChild(cell(pToDisplay, 'nowrap'));
+
+    tr.appendChild(cell(fmtInt(rRiceBags), 'num'));
+    tr.appendChild(cell(fmtWeight(rRiceW), 'num'));
+    tr.appendChild(cell(fmtInt(rWheatBags), 'num'));
+    tr.appendChild(cell(fmtWeight(rWheatW), 'num'));
+    tr.appendChild(cell(fmtInt(iRiceBags), 'num'));
+    tr.appendChild(cell(fmtWeight(iRiceW), 'num'));
+    tr.appendChild(cell(fmtInt(iWheatBags), 'num'));
+    tr.appendChild(cell(fmtWeight(iWheatW), 'num'));
+
+    tr.appendChild(cell(fmtMoney2(handlingCharges), 'num'));
+    tr.appendChild(cell(fmtMoney2(transportationCharges), 'num'));
+
+    tr.appendChild(cell(fmtMoney2(supervisionCharges), 'num')); // supervision column
+
+    tr.appendChild(cell(fmtMoney2(htcClaimed), 'num'));
+    tr.appendChild(cell(fmtMoney0(gross), 'num')); // Rounded gross
+    tr.appendChild(cell(fmtMoney0(tds), 'num'));   // Rounded TDS
+    tr.appendChild(cell(fmtMoney0(nett), 'num'));  // Rounded Nett
+    tr.appendChild(cell(soDateDisplay, 'nowrap'));
+    tr.appendChild(cell(remarks, 'nowrap'));
+
+    const act = document.createElement('td');
+    act.className = 'nowrap';
+    const openBtn = document.createElement('button');
+    openBtn.textContent = 'Open';
+    openBtn.className = 'btn ghost';
+    openBtn.onclick = ()=>{
+      try {
+        const payload = { idx: idx, A1: depot, A2: billNo };
+        localStorage.setItem('bill_to_open', JSON.stringify(payload));
+      } catch(e){}
+      window.location.href = 'bills_calc.html';
+    };
+    const delBtn = document.createElement('button');
+    delBtn.textContent = 'Delete';
+    delBtn.className = 'btn';
+    delBtn.style.background = '#ef6b6b'; delBtn.style.color = '#111';
+    delBtn.onclick = ()=>{
+      if(!confirm('Delete this saved bill?')) return;
+      const arr = loadBills();
+      arr.splice(idx,1);
+      saveBills(arr);
+      renderTable();
+    };
+    act.appendChild(openBtn);
+    act.appendChild(delBtn);
+    tr.appendChild(act);
+
+    tbody.appendChild(tr);
+  });
+}
+
+/* Export CSV (Excel-friendly) */
+function exportCSV(){
+  const bills = loadBills();
+  loadSOR();
+  if(!bills.length){ alert('No bills to export'); return; }
+  const headers = [
+    'Serial Number','Depot Name','Agency','Name of the Contractor','Bill Number','Date','Period From','Period To',
+    'Receipt Rice Bags','Receipt Rice Weight','Receipt Wheat Bags','Receipt Wheat Weight',
+    'Issue Rice Bags','Issue Rice Weight','Issue Wheat Bags','Issue Wheat Weight',
+    'Handling Charges (H&T)','Transportation charges','Supervision','Total H&T Claimed',
+    'Total amount admitted by FCI (Gross)','TDS','Nett Amount','SO Date','Remarks'
+  ];
+
+  const rows = [headers];
+  bills.forEach((b, idx)=>{
+    const depot = (b.A1||'').trim();
+    const agency = b.A3 || (sorMap[depot] && sorMap[depot].agency) || '';
+    const contractor = b.A47 || (sorMap[depot] && sorMap[depot].contractorName) || '';
+    const billNo = b.A2 || '';
+    const dateDisplay = formatDateDDMMYYYY(b.A48 || '');
+    const pFromDisplay = formatDateDDMMYYYY(b.A49 || '');
+    const pToDisplay = formatDateDDMMYYYY(b.A50 || '');
+
+    const rRiceBags = b.A4 || '';
+    const rRiceW = b.A5 || '';
+    const rWheatBags = b.A7 || '';
+    const rWheatW = b.A8 || '';
+    const iRiceBags = b.A23 || '';
+    const iRiceW = b.A24 || '';
+    const iWheatBags = b.A26 || '';
+    const iWheatW = b.A27 || '';
+
+    const wagonTotal = Number(b.A34 || 0);
+    const stackingTotal = Number(b.A35 || 0);
+    const issuesTotal = Number(b.A36 || 0);
+    const transportTotal = Number(b.A37 || 0);
+    const asor = getASORForDepot(depot);
+
+    const opsSum = wagonTotal + stackingTotal + issuesTotal;
+    const handlingCharges = opsSum * (1 + asor);
+    const transportationCharges = transportTotal * (1 + asor);
+
+    let supervisionCharges = Number(b.A40 || 0);
+    if(!supervisionCharges){
+      const savedA39 = Number(b.A39 || 0);
+      if(savedA39) supervisionCharges = savedA39 * (getSupervisionRateForDepot(depot)||0);
+      else supervisionCharges = opsSum * (getSupervisionRateForDepot(depot)||0);
+    }
+
+    const htcClaimed = Number(b.A51 || 0);
+    const gross = Number(b.A41 || 0);
+    const tds = Number(b.A42 || 0);
+    const nett = Number(b.A46 || 0);
+    const soDateDisplay = formatDateDDMMYYYY(b.A54 || '');
+    const remarks = b.A53 || '';
+
+    const row = [
+      idx+1, depot, agency, contractor, billNo, dateDisplay, pFromDisplay, pToDisplay,
+      rRiceBags, rRiceW, rWheatBags, rWheatW,
+      iRiceBags, iRiceW, iWheatBags, iWheatW,
+      handlingCharges.toFixed(2), transportationCharges.toFixed(2), supervisionCharges.toFixed(2), htcClaimed.toFixed(2),
+      Math.round(gross), Math.round(tds), Math.round(nett), soDateDisplay, remarks
+    ];
+    rows.push(row);
+  });
+
+  // convert rows to CSV with proper quoting
+  const csv = rows.map(r => r.map(field => {
+    if(field === null || field === undefined) return '';
+    const s = String(field);
+    if(s.includes('"')) return `"${s.replace(/"/g,'""')}"`;
+    if(s.includes(',') || s.includes('\n')) return `"${s}"`;
+    return s;
+  }).join(',')).join('\r\n');
+
+  const blob = new Blob([csv], {type: 'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `bills_export_${new Date().toISOString().slice(0,10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+/* Export JSON */
+function exportJSON(){
+  const data = JSON.stringify(loadBills(), null, 2);
+  const blob = new Blob([data], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = 'bills_export.json'; a.click();
+  URL.revokeObjectURL(url);
+}
+
+/* Import JSON */
+document.getElementById('importFile').addEventListener('change', (e)=>{
+  const f = e.target.files[0]; if(!f) return;
+  const r = new FileReader();
+  r.onload = ()=> {
+    try {
+      const parsed = JSON.parse(r.result);
+      if(!Array.isArray(parsed)) { alert('Invalid file (expected array)'); return; }
+      saveBills(parsed);
+      renderTable();
+      alert('Imported');
+    } catch(err){ alert('Import error'); console.error(err); }
+  };
+  r.readAsText(f);
+});
+
+document.getElementById('refreshBtn').addEventListener('click', renderTable);
+document.getElementById('filter').addEventListener('input', renderTable);
+document.getElementById('filterAmount').addEventListener('input', renderTable);
+document.getElementById('filterFrom').addEventListener('change', renderTable);
+document.getElementById('filterTo').addEventListener('change', renderTable);
+document.getElementById('exportCsvBtn').addEventListener('click', exportCSV);
+document.getElementById('exportJsonBtn').addEventListener('click', exportJSON);
+
+// initial load
+loadSOR();
+renderTable();
+
+// sync across tabs
+window.addEventListener('storage', (ev)=>{
+  if(SOR_KEYS.includes(ev.key) || ev.key === 'bills') renderTable();
+});
+</script>
+</body>
+</html>
