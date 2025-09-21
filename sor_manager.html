@@ -51,12 +51,12 @@
       <div class="logo">SOR</div>
       <div style="flex:1">
         <h1>SOR Manager — All Columns Visible</h1>
-        <div class="small">Every field shows in the list after saving. Data stored in localStorage key: <code>sor_data</code></div>
+        <div class="small">Every field shows in the list after saving. Data stored in Firebase Realtime Database node: <code>/sor_data</code></div>
       </div>
       <div style="display:flex;gap:8px;align-items:center">
         <button id="homeBtn" class="btn ghost">Home</button>
         <button id="exportBtn" class="btn">Export JSON</button>
-        <input id="importFile" type="file" style="display:none" />
+        <input id="importFile" type="file" style="display:none" accept="application/json" />
         <label for="importFile" class="btn ghost">Import</label>
       </div>
     </header>
@@ -169,29 +169,34 @@
     </main>
   </div>
 
-<script>
-/*
- Data schema:
- {
-   id,
-   depotName,
-   agency,
-   contractorName,
-   distance,
-   asor,
-   unloading,
-   issues,
-   receipt10,
-   receipt16,
-   receipt20,
-   receiptBeyond,
-   transportation,
-   supervision,
-   note,
-   createdAt
- }
-*/
+<script type="module">
+/* ================= Firebase Realtime Database integration =================
+   - Stores SOR data under node: /sor_data
+   - Uses realtime onValue subscription so UI updates across devices/tabs.
+   ======================================================================= */
 
+import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+import {
+  getDatabase, ref, get, set, onValue
+} from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
+
+/* ---------- Your Firebase config (provided earlier) ---------- */
+const firebaseConfig = {
+  apiKey: "AIzaSyC2k01vwFXal76FMpUfqkqmBeaG-owEYyU",
+  authDomain: "contract-bills-register-final.firebaseapp.com",
+  projectId: "contract-bills-register-final",
+  storageBucket: "contract-bills-register-final.firebasestorage.app",
+  messagingSenderId: "606100313601",
+  appId: "1:606100313601:web:666aeff39f71c48d3c9200",
+  measurementId: "G-P4W6D761M2",
+  databaseURL: "https://contract-bills-register-final-default-rtdb.firebaseio.com"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+const SOR_NODE = 'sor_data';
+
+/* ---------- DOM helpers ---------- */
 const $ = s => document.querySelector(s);
 const listBody = $('#listBody');
 const filterText = $('#filterText');
@@ -218,20 +223,59 @@ const note = $('#note');
 const saveBtn = $('#saveBtn');
 const cancelBtn = $('#cancelBtn');
 
-let data = [];
-let editingId = null;
+let data = [];         // local cache of SOR entries (array)
+let editingId = null;  // id being edited (if any)
 
-function loadFromStorage(){
-  try {
-    const raw = localStorage.getItem('sor_data');
-    data = raw ? JSON.parse(raw) : [];
-  } catch(e){ console.error(e); data = [] }
-}
-function saveToStorage(){ localStorage.setItem('sor_data', JSON.stringify(data)); }
-
+/* ---------- Utility ---------- */
 function escapeHtml(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function isNumber(v){ return v !== '' && !isNaN(Number(v)); }
 
+/* ---------- Firebase read/write helpers ---------- */
+async function readSORFromFirebase(){
+  try{
+    const snap = await get(ref(db, SOR_NODE));
+    const val = snap.exists() ? snap.val() : null;
+    // convert object -> array if necessary
+    if(val && !Array.isArray(val) && typeof val === 'object'){
+      const arr = Object.keys(val).map(k => val[k]);
+      return arr;
+    }
+    return Array.isArray(val) ? val : [];
+  }catch(err){
+    console.error('Error reading SOR from Firebase', err);
+    return [];
+  }
+}
+
+async function writeSORToFirebase(arr){
+  try{
+    // ensure array (Firebase can store arrays)
+    await set(ref(db, SOR_NODE), arr);
+  }catch(err){
+    console.error('Error writing SOR to Firebase', err);
+    throw err;
+  }
+}
+
+/* ---------- Realtime subscription to keep UI live ---------- */
+function subscribeSOR(){
+  onValue(ref(db, SOR_NODE), (snap)=>{
+    const val = snap.exists() ? snap.val() : null;
+    if(val && !Array.isArray(val) && typeof val === 'object'){
+      data = Object.keys(val).map(k => val[k]);
+    } else {
+      data = Array.isArray(val) ? val : [];
+    }
+    renderList();
+  }, (err) => {
+    console.error('SOR subscription error', err);
+    // fallback: keep data as empty and render
+    data = data || [];
+    renderList();
+  });
+}
+
+/* ---------- Rendering ---------- */
 function renderList(){
   const q = (filterText.value||'').trim().toLowerCase();
   listBody.innerHTML = '';
@@ -272,43 +316,74 @@ function renderList(){
   attachRowActions();
 }
 
+/* ---------- Attach row action handlers ---------- */
 function attachRowActions(){
   listBody.querySelectorAll('button[data-action]').forEach(b=>{
-    b.onclick = ()=> {
+    b.onclick = async ()=> {
       const id = b.getAttribute('data-id');
       const a = b.getAttribute('data-action');
       if(a === 'edit') openEdit(id);
       if(a === 'delete') {
-        if(confirm('Delete this entry?')) deleteEntry(id);
+        if(!confirm('Delete this entry?')) return;
+        try{
+          await deleteEntryFirebase(id);
+        }catch(e){
+          console.error(e);
+          alert('Delete failed');
+        }
       }
     };
   });
 }
 
-function createEntry(obj){
-  obj.id = 'sor_' + Date.now() + '_' + Math.floor(Math.random()*9999);
-  obj.createdAt = Date.now();
-  data.unshift(obj);
-  saveToStorage();
-  renderList();
-  clearForm();
+/* ---------- Create / Update / Delete using Firebase ---------- */
+
+function generateId(){
+  return 'sor_' + Date.now() + '_' + Math.floor(Math.random()*9999);
 }
 
-function updateEntry(id, values){
-  const idx = data.findIndex(d => d.id === id);
-  if(idx === -1) return;
-  data[idx] = {...data[idx], ...values};
-  saveToStorage();
-  renderList();
-  clearForm();
+async function createEntryFirebase(obj){
+  // read current array, prepend new entry, write back
+  try{
+    const arr = await readSORFromFirebase();
+    obj.id = obj.id || generateId();
+    obj.createdAt = Date.now();
+    arr.unshift(obj);
+    await writeSORToFirebase(arr);
+    clearForm();
+    // onValue subscription will update UI
+  }catch(e){
+    console.error('Create failed', e);
+    alert('Create failed');
+  }
 }
 
-function deleteEntry(id){
-  data = data.filter(d => d.id !== id);
-  saveToStorage();
-  renderList();
+async function updateEntryFirebase(id, values){
+  try{
+    const arr = await readSORFromFirebase();
+    const idx = arr.findIndex(d => d && d.id === id);
+    if(idx === -1){ alert('Entry not found'); return; }
+    arr[idx] = {...arr[idx], ...values};
+    await writeSORToFirebase(arr);
+    clearForm();
+  }catch(e){
+    console.error('Update failed', e);
+    alert('Update failed');
+  }
 }
 
+async function deleteEntryFirebase(id){
+  try{
+    const arr = await readSORFromFirebase();
+    const newArr = arr.filter(d => d && d.id !== id);
+    await writeSORToFirebase(newArr);
+  }catch(e){
+    console.error('Delete failed', e);
+    alert('Delete failed');
+  }
+}
+
+/* ---------- Open edit (populate form) ---------- */
 function openEdit(id){
   const entry = data.find(d => d.id === id);
   if(!entry) return;
@@ -317,7 +392,7 @@ function openEdit(id){
   agency.value = entry.agency || '';
   contractorName.value = entry.contractorName || '';
   distance.value = entry.distance || '';
-  asor.value = entry.asor || '';
+  asor.value = entry.asor !== undefined && entry.asor !== null ? entry.asor : '';
   unloading.value = entry.unloading || '';
   issues.value = entry.issues || '';
   receipt10.value = entry.receipt10 || '';
@@ -329,34 +404,56 @@ function openEdit(id){
   note.value = entry.note || '';
 }
 
-exportBtn.addEventListener('click', ()=>{
-  const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = 'sor_data.json'; a.click();
-  URL.revokeObjectURL(url);
+/* ---------- Clear form ---------- */
+function clearForm(){
+  editingId = null;
+  depotName.value = '';
+  agency.value = '';
+  contractorName.value = '';
+  distance.value = '';
+  asor.value = '';
+  unloading.value = '';
+  issues.value = '';
+  receipt10.value = '';
+  receipt16.value = '';
+  receipt20.value = '';
+  receiptBeyond.value = '';
+  transportation.value = '';
+  supervision.value = '';
+  note.value = '';
+}
+
+/* ---------- Exports & Imports (Firebase-backed) ---------- */
+exportBtn.addEventListener('click', async ()=>{
+  try{
+    const arr = await readSORFromFirebase();
+    const blob = new Blob([JSON.stringify(arr || [], null, 2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'sor_data.json'; a.click();
+    URL.revokeObjectURL(url);
+  }catch(e){ console.error(e); alert('Export failed'); }
 });
 
-importFile.addEventListener('change', (e)=>{
+importFile.addEventListener('change', async (e)=>{
   const f = e.target.files[0];
   if(!f) return;
   const reader = new FileReader();
-  reader.onload = ()=>{
+  reader.onload = async ()=>{
     try {
       const parsed = JSON.parse(reader.result);
-      if(Array.isArray(parsed)) {
-        data = parsed;
-        saveToStorage();
-        renderList();
-      } else {
-        alert('Invalid file format: expected an array of entries');
-      }
+      if(!Array.isArray(parsed)){ alert('Invalid file format: expected an array of entries'); return; }
+      // Ensure each entry has id/createdAt
+      const cleaned = parsed.map(it => ({ id: it.id || generateId(), createdAt: it.createdAt || Date.now(), ...it }));
+      await writeSORToFirebase(cleaned);
+      alert('Imported to Firebase');
     } catch(err){ alert('Error parsing file'); console.error(err); }
   };
   reader.readAsText(f);
 });
 
-saveBtn.addEventListener('click', ()=>{
+/* ---------- Save button ---------- */
+saveBtn.addEventListener('click', async ()=>{
   const dName = (depotName.value||'').trim();
   const ag = (agency.value||'').trim();
   const cont = (contractorName.value||'').trim();
@@ -384,35 +481,32 @@ saveBtn.addEventListener('click', ()=>{
     note: (note.value||'').trim()
   };
 
-  if(editingId) updateEntry(editingId, payload);
-  else createEntry(payload);
+  if(editingId){
+    await updateEntryFirebase(editingId, payload);
+  } else {
+    await createEntryFirebase(payload);
+  }
 });
 
+/* ---------- Cancel ---------- */
 cancelBtn.addEventListener('click', clearForm);
 filterText.addEventListener('input', renderList);
 homeBtn.addEventListener('click', ()=> { window.location.href = 'index.html'; });
 
-function clearForm(){
-  editingId = null;
-  depotName.value = '';
-  agency.value = '';
-  contractorName.value = '';
-  distance.value = '';
-  asor.value = '';
-  unloading.value = '';
-  issues.value = '';
-  receipt10.value = '';
-  receipt16.value = '';
-  receipt20.value = '';
-  receiptBeyond.value = '';
-  transportation.value = '';
-  supervision.value = '';
-  note.value = '';
-}
+/* ---------- Initialization ---------- */
+(function init(){
+  // Subscribe to SOR node so UI updates live
+  subscribeSOR();
 
-loadFromStorage();
-renderList();
+  // initial read (subscribe will also supply data)
+  readSORFromFirebase().then(arr => {
+    data = Array.isArray(arr) ? arr : [];
+    renderList();
+  }).catch(e=>{ console.warn('Initial SOR read failed', e); });
+
+  // clean up import input on page load
+  importFile.value = '';
+})();
 </script>
 </body>
 </html>
-
