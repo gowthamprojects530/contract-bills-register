@@ -33,7 +33,7 @@
   <div class="wrap">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
       <h1>Bills Data — All Fields</h1>
-      <div class="small">Data stored in localStorage key <code>bills</code></div>
+      <div class="small">Data stored in Firebase Realtime Database node <code>/bills</code></div>
     </div>
 
     <div class="card">
@@ -94,78 +94,35 @@
     </div>
   </div>
 
-<script>
+<script type="module">
 /*
- Field mapping (from saved bill b):
- A1 Depot
- A2 Bill No
- A3 Agency
- A4 Rice Bags (receipt)
- A5 Rice Weight (receipt)
- A7 Wheat Bags (receipt)
- A8 Wheat Weight (receipt)
- A23 Issue Rice Bags
- A24 Issue Rice Weight
- A26 Issue Wheat Bags
- A27 Issue Wheat Weight
- A34 Wagon Receipt Total
- A35 Stacking Total
- A36 Issues Total
- A37 Transportation Total
- A39 ASOR (calculated)
- A40 Supervision (calculated)
- A41 Gross
- A42 TDS
- A43 Other Recoveries
- A44 SD Recovery yes/no
- A45 SD Recovery amount
- A46 Nett
- A47 Contractor name
- A48 Date
- A49 Period From
- A50 Period To
- A51 H&T Claimed amount
- A52 Withheld amount
- A53 Remarks
- A54 SO Date
+ This version stores and reads data from Firebase Realtime Database.
+ It expects your Firebase Realtime Database to be available at the databaseURL
+ included in the firebaseConfig below (you already gave that config).
 */
 
-const BILLS_KEY = 'bills';
-const SOR_KEYS = ['sor_data','sorData_v1','sor'];
+import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+import { getDatabase, ref, get, set, onValue } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
 
-function loadBills(){
-  try { return JSON.parse(localStorage.getItem(BILLS_KEY) || '[]'); } catch(e){ return []; }
-}
-function saveBills(arr){ localStorage.setItem(BILLS_KEY, JSON.stringify(arr)); }
+/* ---------- Firebase config (your config) ---------- */
+const firebaseConfig = {
+  apiKey: "AIzaSyC2k01vwFXal76FMpUfqkqmBeaG-owEYyU",
+  authDomain: "contract-bills-register-final.firebaseapp.com",
+  projectId: "contract-bills-register-final",
+  storageBucket: "contract-bills-register-final.firebasestorage.app",
+  messagingSenderId: "606100313601",
+  appId: "1:606100313601:web:666aeff39f71c48d3c9200",
+  measurementId: "G-P4W6D761M2",
+  databaseURL: "https://contract-bills-register-final-default-rtdb.firebaseio.com"
+};
 
-let sorMap = {};
-function loadSOR(){
-  sorMap = {};
-  for(const k of SOR_KEYS){
-    try{
-      const raw = localStorage.getItem(k);
-      if(!raw) continue;
-      const arr = JSON.parse(raw);
-      if(!Array.isArray(arr)) continue;
-      arr.forEach(it=>{
-        const name = (it.depotName||it.depot||'').trim();
-        if(!name) return;
-        let asor = Number(it.asor||0); if(asor>1) asor = asor/100;
-        let sup = Number(it.supervision||0); if(sup>1) sup = sup/100;
-        sorMap[name] = {
-          asor: asor,
-          supervision: sup,
-          agency: it.agency || '',
-          contractorName: it.contractorName || ''
-        };
-      });
-      if(Object.keys(sorMap).length) break;
-    }catch(e){ continue; }
-  }
-}
-function getASORForDepot(dep){ if(!dep) return 0; return (sorMap[dep] && typeof sorMap[dep].asor === 'number') ? Number(sorMap[dep].asor) : 0; }
-function getSupervisionRateForDepot(dep){ if(!dep) return 0; return (sorMap[dep] && typeof sorMap[dep].supervision === 'number') ? Number(sorMap[dep].supervision) : 0; }
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
 
+const BILLS_NODE = 'bills';
+const SOR_NODE = 'sor_data';
+
+/* ---------- Helpers (same as your original) ---------- */
 function fmtMoney2(v){
   const n = Number(String(v||0).replace(/,/g,'')); if(!isFinite(n)) return '0.00';
   return n.toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2});
@@ -180,16 +137,12 @@ function fmtWeight(v){
 }
 function fmtInt(v){ const n = Number(String(v||0).replace(/,/g,'')); if(!isFinite(n)) return '0'; return String(Math.trunc(n)); }
 
-/* format date as dd-mm-yyyy if possible, otherwise return original string */
 function formatDateDDMMYYYY(s){
   if(!s) return '';
-  // Accept YYYY-MM-DD or ISO strings. Try splitting first.
   try {
-    // if already contains '-' and looks like YYYY-MM-DD
     if(/^\d{4}-\d{2}-\d{2}$/.test(s)){
       const [y,m,d] = s.split('-'); return `${d}-${m}-${y}`;
     }
-    // If it's in ISO format with time, try new Date
     const dt = new Date(s);
     if(isNaN(dt.getTime())) return s;
     const d = String(dt.getDate()).padStart(2,'0');
@@ -198,7 +151,6 @@ function formatDateDDMMYYYY(s){
     return `${d}-${m}-${y}`;
   } catch(e){ return s; }
 }
-
 function cell(text, cls){
   const td = document.createElement('td');
   if(cls) td.className = cls;
@@ -206,23 +158,95 @@ function cell(text, cls){
   return td;
 }
 
-/* Rendering with filters: text search, amount exact match, date range on A48 (Bill Date) */
-function renderTable(){
+/* ---------- SOR handling (we will load from Firebase) ---------- */
+let sorMap = {};
+function buildSorMap(arr){
+  sorMap = {};
+  if(Array.isArray(arr) && arr.length){
+    arr.forEach(it=>{
+      const name = (it.depotName||it.depot||'').trim();
+      if(!name) return;
+      let asor = Number(it.asor||0); if(asor>1) asor = asor/100;
+      let sup = Number(it.supervision||0); if(sup>1) sup = sup/100;
+      sorMap[name] = {
+        asor: asor,
+        supervision: sup,
+        agency: it.agency || '',
+        contractorName: it.contractorName || ''
+      };
+    });
+  } else {
+    // fallback (same samples you had)
+    sorMap = {
+      "FSD MG Complex": { asor:0.05, supervision:0.01, agency:"FCI", contractorName:"Sample Contractor" },
+      "MG Complex(MVN)": { asor:0.04, supervision:0.012, agency:"CWC", contractorName:"Another Contractor" }
+    };
+  }
+}
+function getASORForDepot(dep){ if(!dep) return 0; return (sorMap[dep] && typeof sorMap[dep].asor === 'number') ? Number(sorMap[dep].asor) : 0; }
+function getSupervisionRateForDepot(dep){ if(!dep) return 0; return (sorMap[dep] && typeof sorMap[dep].supervision === 'number') ? Number(sorMap[dep].supervision) : 0; }
+
+/* ---------- Firebase-backed bills functions ---------- */
+async function loadBillsFromFirebase(){
+  try{
+    const snap = await get(ref(db, BILLS_NODE));
+    let val = snap.exists() ? snap.val() : [];
+    // convert object -> array if necessary
+    if(val && !Array.isArray(val) && typeof val === 'object'){
+      val = Object.keys(val).map(k => val[k]);
+    }
+    return Array.isArray(val) ? val : [];
+  }catch(e){
+    console.error('Error fetching bills from Firebase', e);
+    return [];
+  }
+}
+async function writeBillsToFirebase(arr){
+  try{
+    await set(ref(db, BILLS_NODE), arr);
+  }catch(e){
+    console.error('Error writing bills to Firebase', e);
+    throw e;
+  }
+}
+
+/* ---------- Firebase subscriptions ---------- */
+function subscribeToSOR(){
+  onValue(ref(db, SOR_NODE), (snap)=>{
+    const val = snap.exists() ? snap.val() : null;
+    const arr = Array.isArray(val) ? val : (val && typeof val === 'object' ? Object.keys(val).map(k => val[k]) : []);
+    buildSorMap(arr);
+    // re-render table (if bills already loaded)
+    renderTableCached();
+  });
+}
+
+let latestBillsCache = []; // keep latest snapshot for filters/export
+function subscribeToBills(){
+  onValue(ref(db, BILLS_NODE), (snap)=>{
+    const val = snap.exists() ? snap.val() : [];
+    const arr = Array.isArray(val) ? val : (val && typeof val === 'object' ? Object.keys(val).map(k=>val[k]) : []);
+    latestBillsCache = arr;
+    renderTableFromArray(arr);
+  });
+}
+
+/* ---------- Rendering (uses latestBillsCache or passed array) ---------- */
+function renderTableCached(){ renderTableFromArray(latestBillsCache); }
+
+function renderTableFromArray(bills){
   const tbody = document.getElementById('tbody');
   tbody.innerHTML = '';
-  const bills = loadBills();
-  loadSOR();
+  // ensure sorMap loaded (may be fallback)
   const q = (document.getElementById('filter').value||'').trim().toLowerCase();
   const amtStr = (document.getElementById('filterAmount').value||'').trim();
   const amtNum = amtStr==='' ? null : Number(amtStr.replace(/,/g,''));
   const fromVal = (document.getElementById('filterFrom').value||'').trim();
   const toVal = (document.getElementById('filterTo').value||'').trim();
-
-  // parse range dates as ISO strings for comparison
   const fromDate = fromVal ? new Date(fromVal) : null;
   const toDate = toVal ? new Date(toVal) : null;
 
-  if(!bills.length){
+  if(!bills || !bills.length){
     const tr = document.createElement('tr');
     const td = document.createElement('td');
     td.colSpan = 27; td.className = 'muted';
@@ -265,12 +289,11 @@ function renderTable(){
     const handlingCharges = opsSum * (1 + asor);
     const transportationCharges = transportTotal * (1 + asor);
 
-    // supervision charges: prefer saved b.A40 (if present numeric), else compute from A39 * supRate or from A38*A...? We'll compute:
     let supervisionCharges = Number(b.A40 || 0);
     if(!supervisionCharges){
       const savedA39 = Number(b.A39 || 0);
       if(savedA39) supervisionCharges = savedA39 * supRate;
-      else supervisionCharges = opsSum * supRate; // fallback
+      else supervisionCharges = opsSum * supRate;
     }
 
     const htcClaimed = Number(b.A51 || 0);
@@ -281,19 +304,16 @@ function renderTable(){
     const soDateDisplay = formatDateDDMMYYYY(soDateRaw);
     const remarks = b.A53 || '';
 
-    // Filtering logic:
-    // text filter: depot/billNo/contractor
+    // Filtering:
     if(q){
       const hay = `${depot} ${billNo} ${contractor}`.toLowerCase();
       if(!hay.includes(q)) return;
     }
-    // amount filter: if provided, match exact on gross or nett (rounded to nearest integer comparison)
     if(amtNum !== null){
       const grossRound = Math.round(gross);
       const nettRound = Math.round(nett);
       if(!(grossRound === amtNum || nettRound === amtNum)) return;
     }
-    // period filter: check bill date (A48) between fromDate and toDate if provided
     if(fromDate || toDate){
       if(!dateRaw) return;
       const billDate = new Date(dateRaw);
@@ -336,26 +356,29 @@ function renderTable(){
 
     const act = document.createElement('td');
     act.className = 'nowrap';
+    // Open button: navigate to bills_calc.html with index
     const openBtn = document.createElement('button');
     openBtn.textContent = 'Open';
     openBtn.className = 'btn ghost';
     openBtn.onclick = ()=>{
-      try {
-        const payload = { idx: idx, A1: depot, A2: billNo };
-        localStorage.setItem('bill_to_open', JSON.stringify(payload));
-      } catch(e){}
-      window.location.href = 'bills_calc.html';
+      // navigate with index param
+      window.location.href = `bills_calc.html?idx=${idx}`;
     };
     const delBtn = document.createElement('button');
     delBtn.textContent = 'Delete';
     delBtn.className = 'btn';
     delBtn.style.background = '#ef6b6b'; delBtn.style.color = '#111';
-    delBtn.onclick = ()=>{
+    delBtn.onclick = async ()=>{
       if(!confirm('Delete this saved bill?')) return;
-      const arr = loadBills();
-      arr.splice(idx,1);
-      saveBills(arr);
-      renderTable();
+      try{
+        const arr = await loadBillsFromFirebase();
+        arr.splice(idx,1);
+        await writeBillsToFirebase(arr);
+        // onValue subscription will re-render table automatically
+      }catch(e){
+        console.error(e);
+        alert('Delete failed');
+      }
     };
     act.appendChild(openBtn);
     act.appendChild(delBtn);
@@ -365,20 +388,9 @@ function renderTable(){
   });
 }
 
-/* Export CSV (Excel-friendly) */
-function exportCSV(){
-  const bills = loadBills();
-  loadSOR();
-  if(!bills.length){ alert('No bills to export'); return; }
-  const headers = [
-    'Serial Number','Depot Name','Agency','Name of the Contractor','Bill Number','Date','Period From','Period To',
-    'Receipt Rice Bags','Receipt Rice Weight','Receipt Wheat Bags','Receipt Wheat Weight',
-    'Issue Rice Bags','Issue Rice Weight','Issue Wheat Bags','Issue Wheat Weight',
-    'Handling Charges (H&T)','Transportation charges','Supervision','Total H&T Claimed',
-    'Total amount admitted by FCI (Gross)','TDS','Nett Amount','SO Date','Remarks'
-  ];
-
-  const rows = [headers];
+/* ---------- Export CSV (reads latestBillsCache) ---------- */
+function rowsFromBills(bills){
+  const rows = [];
   bills.forEach((b, idx)=>{
     const depot = (b.A1||'').trim();
     const agency = b.A3 || (sorMap[depot] && sorMap[depot].agency) || '';
@@ -430,8 +442,23 @@ function exportCSV(){
     ];
     rows.push(row);
   });
+  return rows;
+}
 
-  // convert rows to CSV with proper quoting
+async function exportCSV(){
+  const bills = latestBillsCache || await loadBillsFromFirebase();
+  loadSORFromFirebaseOnce(); // try refresh SOR mapping
+  if(!bills.length){ alert('No bills to export'); return; }
+  const headers = [
+    'Serial Number','Depot Name','Agency','Name of the Contractor','Bill Number','Date','Period From','Period To',
+    'Receipt Rice Bags','Receipt Rice Weight','Receipt Wheat Bags','Receipt Wheat Weight',
+    'Issue Rice Bags','Issue Rice Weight','Issue Wheat Bags','Issue Wheat Weight',
+    'Handling Charges (H&T)','Transportation charges','Supervision','Total H&T Claimed',
+    'Total amount admitted by FCI (Gross)','TDS','Nett Amount','SO Date','Remarks'
+  ];
+
+  const rows = [headers].concat(rowsFromBills(bills));
+
   const csv = rows.map(r => r.map(field => {
     if(field === null || field === undefined) return '';
     const s = String(field);
@@ -451,47 +478,62 @@ function exportCSV(){
   URL.revokeObjectURL(url);
 }
 
-/* Export JSON */
-function exportJSON(){
-  const data = JSON.stringify(loadBills(), null, 2);
+async function exportJSON(){
+  const bills = latestBillsCache || await loadBillsFromFirebase();
+  const data = JSON.stringify(bills, null, 2);
   const blob = new Blob([data], {type:'application/json'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href = url; a.download = 'bills_export.json'; a.click();
   URL.revokeObjectURL(url);
 }
 
-/* Import JSON */
-document.getElementById('importFile').addEventListener('change', (e)=>{
+/* ---------- Import JSON (write to Firebase) ---------- */
+document.getElementById('importFile').addEventListener('change', async (e)=>{
   const f = e.target.files[0]; if(!f) return;
   const r = new FileReader();
-  r.onload = ()=> {
+  r.onload = async ()=>{
     try {
       const parsed = JSON.parse(r.result);
       if(!Array.isArray(parsed)) { alert('Invalid file (expected array)'); return; }
-      saveBills(parsed);
-      renderTable();
-      alert('Imported');
+      await writeBillsToFirebase(parsed);
+      alert('Imported to Firebase');
     } catch(err){ alert('Import error'); console.error(err); }
   };
   r.readAsText(f);
 });
 
-document.getElementById('refreshBtn').addEventListener('click', renderTable);
-document.getElementById('filter').addEventListener('input', renderTable);
-document.getElementById('filterAmount').addEventListener('input', renderTable);
-document.getElementById('filterFrom').addEventListener('change', renderTable);
-document.getElementById('filterTo').addEventListener('change', renderTable);
+/* ---------- Quick SOR loader (single read, used by export path) ---------- */
+async function loadSORFromFirebaseOnce(){
+  try{
+    const snap = await get(ref(db, SOR_NODE));
+    const val = snap.exists() ? snap.val() : null;
+    const arr = Array.isArray(val) ? val : (val && typeof val === 'object' ? Object.keys(val).map(k => val[k]) : []);
+    buildSorMap(arr);
+  }catch(e){
+    console.warn('Failed one-time SOR load', e);
+  }
+}
+/* alias for exported use */
+const loadSORFromFirebaseOnce = loadSORFromFirebaseOnce;
+
+/* ---------- UI wiring ---------- */
+document.getElementById('refreshBtn').addEventListener('click', ()=>{ renderTableCached(); });
+document.getElementById('filter').addEventListener('input', renderTableCached);
+document.getElementById('filterAmount').addEventListener('input', renderTableCached);
+document.getElementById('filterFrom').addEventListener('change', renderTableCached);
+document.getElementById('filterTo').addEventListener('change', renderTableCached);
 document.getElementById('exportCsvBtn').addEventListener('click', exportCSV);
 document.getElementById('exportJsonBtn').addEventListener('click', exportJSON);
 
-// initial load
-loadSOR();
-renderTable();
-
-// sync across tabs
-window.addEventListener('storage', (ev)=>{
-  if(SOR_KEYS.includes(ev.key) || ev.key === 'bills') renderTable();
-});
+/* ---------- Initialization: subscribe to Firebase nodes ---------- */
+(async function init(){
+  // load SOR initially (subscribe too)
+  subscribeToSOR();
+  // subscribe to bills (will render table on each change)
+  subscribeToBills();
+  // try single read to populate SOR quickly for immediate formatting/export tasks
+  await loadSORFromFirebaseOnce();
+})();
 </script>
 </body>
 </html>
