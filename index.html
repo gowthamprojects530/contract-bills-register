@@ -58,27 +58,23 @@
     <div class="logo">GOWTHAM PROJECTS</div>
     <h1>Contract Bills — Home</h1>
    
-
     <div class="grid" role="navigation" aria-label="App pages">
       <div class="card">
         <h3>Bills Calculator</h3>
         <p>Fill and calculate bills. Create / Load / Save / Delete billing records.</p>
         <a class="btn" href="./bills_calc.html">Open Calculator</a>
-        
       </div>
 
       <div class="card">
         <h3>Bills Register</h3>
         <p>Manage saved bills, search, export and send selected bill to calculator.</p>
         <a class="btn" href="./bills_data.html">Open Bills Data</a>
-
       </div>
 
       <div class="card">
         <h3>SOR Manager</h3>
         <p>Maintain depot list and SOR rates used by the calculator (depot → agency → SOR values).</p>
         <a class="btn" href="./sor_manager.html">Open SOR Manager</a>
-        
       </div>
     </div>
 
@@ -86,5 +82,27 @@
       Tip: If pages don't show expected data, ensure the SOR Manager has been used to save depot entries (it stores under <code>localStorage['sorData_v1']</code>).
     </footer>
   </div>
+
+  <!-- Firebase Hosting config -->
+  <script type="module">
+    // Import Firebase SDK
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+    import { getAnalytics } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-analytics.js";
+
+    // Your web app's Firebase configuration
+    const firebaseConfig = {
+      apiKey: "AIzaSyC2k01vwFXal76FMpUfqkqmBeaG-owEYyU",
+      authDomain: "contract-bills-register-final.firebaseapp.com",
+      projectId: "contract-bills-register-final",
+      storageBucket: "contract-bills-register-final.firebasestorage.app",
+      messagingSenderId: "606100313601",
+      appId: "1:606100313601:web:666aeff39f71c48d3c9200",
+      measurementId: "G-P4W6D761M2"
+    };
+
+    // Initialize Firebase
+    const app = initializeApp(firebaseConfig);
+    const analytics = getAnalytics(app);
+  </script>
 </body>
 </html>
